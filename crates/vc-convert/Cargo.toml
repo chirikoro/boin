@@ -1,0 +1,17 @@
+[package]
+name = "vc-convert"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Offline RVC .pth → .onnx converter (vendored from shirohata/vc-rs v0.5.3, MIT; patched to accept no-F0 v2 checkpoints)"
+
+[features]
+# Exposes the tiny checked-in .pth fixtures to other crates' tests
+# (vc-core's onnx_meta round-trip suite). Never enabled by shipped builds.
+test-fixtures = []
+
+[dependencies]
+anyhow = { workspace = true }
+serde_json = "1"
+# ZIP parsing stays in the maintained library; PTH needs only Stored and Deflate.
+zip = { version = "8.6", default-features = false, features = ["deflate"] }

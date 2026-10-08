@@ -1,0 +1,21 @@
+[package]
+name = "boin-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "boin-gui"
+path = "src/main.rs"
+
+[dependencies]
+boin-core = { path = "../boin-core" }
+anyhow.workspace = true
+tracing.workspace = true
+serde.workspace = true
+eframe = { version = "0.36", default-features = false, features = ["glow", "default_fonts", "wayland", "x11"] }
+egui = "0.36"
+rfd = "0.17"
+toml = "1"
+dirs = "6"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

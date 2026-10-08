@@ -1,0 +1,5 @@
+# egui/eframe 0.36 は rustc 1.95 以上が必要。ローカル・CI・Windows で同じ版を使う。
+[toolchain]
+channel = "1.98.1"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

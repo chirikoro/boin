@@ -1,0 +1,65 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bins: "boin.exe boin-gui.exe"
+          - name: macos-arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            bins: "boin boin-gui"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --workspace --release --target ${{ matrix.target }}
+      - name: Build
+        run: cargo build --workspace --release --target ${{ matrix.target }}
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="dist/boin-${{ matrix.name }}"
+          mkdir -p "$out/models" "$out/assets"
+          for b in ${{ matrix.bins }}; do cp "target/${{ matrix.target }}/release/$b" "$out/"; done
+          # ONNX Runtime の共有ライブラリが隣に生成される構成（copy-dylibs）に備えてコピーする
+          shopt -s nullglob
+          cp target/${{ matrix.target }}/release/*.dll target/${{ matrix.target }}/release/*.dylib "$out/" 2>/dev/null || true
+          cp README.ja.md "$out/"
+          cp crates/boin-gui/assets/OFL-BIZUDPGothic.txt "$out/"
+          cp crates/vc-convert/LICENSE-vc-rs "$out/"
+          cp LICENSE "$out/" 2>/dev/null || true
+          echo "models/ に V2-AISO-*.pth を置いてください（.onnx は初回起動時に自動生成されます）" > "$out/models/README.txt"
+          echo "assets/ には初回起動時に基盤モデル（ContentVec）が自動ダウンロードされます" > "$out/assets/README.txt"
+          (cd dist && 7z a -tzip "boin-${{ matrix.name }}.zip" "boin-${{ matrix.name }}" >/dev/null)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: boin-${{ matrix.name }}
+          path: dist/boin-${{ matrix.name }}.zip
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/boin-${{ matrix.name }}.zip

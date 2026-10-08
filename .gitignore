@@ -1,0 +1,10 @@
+/target
+/models/*.onnx
+/models/*.pth
+/models/*.onnx.tmp
+/assets/*.onnx
+/assets/download.log
+/out
+*.wav
+!crates/**/*.wav
+.DS_Store
