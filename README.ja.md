@@ -27,6 +27,25 @@ boin/
 
 Windows 版は `onnxruntime.dll` を実行時に読み込みます。exe と同じフォルダに置いてください（環境変数 `ORT_DYLIB_PATH` で場所を指定することもできます）。
 
+## ダウンロード
+
+[Releases](https://github.com/chirikoro/boin/releases) から `boin-windows-x64.zip` または `boin-macos-arm64.zip` を取得してください。
+（Actions の Artifact は GitHub の仕様で zip が二重になるため、Release の方を使ってください。）
+
+### 初回起動時の警告について
+
+配布物には署名を付けていないため、OS が「発行元不明」として警告します。アプリ自体の問題ではありません。
+
+- **Windows（SmartScreen）**: 「Windows によって PC が保護されました」→「詳細情報」→「実行」。
+- **macOS（Gatekeeper）**: 「"boin-gui" は開いていません」と出たら「完了」を押し、システム設定 → プライバシーとセキュリティ → 「このまま開く」。
+  またはターミナルで隔離属性を外します。
+
+  ```sh
+  xattr -dr com.apple.quarantine ~/Downloads/boin-macos-arm64
+  ```
+
+自分の PC でビルドしたものには警告は出ません。
+
 ## 使い方（Windows）
 
 1. zip を展開し、`models/` に `V2-AISO-*.pth`（5 ファイル）をコピーします。
