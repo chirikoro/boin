@@ -7,6 +7,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Release の作成（タグ push 時）に contents: write が必要
+permissions:
+  contents: write
+
 env:
   CARGO_TERM_COLOR: always
   # Microsoft 公式 ONNX Runtime（Windows の実行時に動的ロードする）
