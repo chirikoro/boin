@@ -74,6 +74,8 @@ struct FileEntry {
 
 struct App {
     home: Home,
+    /// 起動時の致命的エラー（onnxruntime.dll が無い等）。
+    fatal: Option<String>,
     settings: Settings,
     files: Vec<FileEntry>,
     running: bool,
@@ -91,8 +93,12 @@ impl App {
         let home = Home::detect();
         let settings = Settings::load();
         let ready = prepare::is_ready(&home, settings.voice, settings.lite);
+        let fatal = boin_core::onnx::init_runtime(&home)
+            .err()
+            .map(|e| format!("{e:#}"));
         App {
             home,
+            fatal,
             settings,
             files: Vec::new(),
             running: false,
@@ -253,6 +259,9 @@ impl eframe::App for App {
                 ui.heading("boin 音声変換");
                 ui.label(egui::RichText::new("愛想良い系少女の声 V2").weak());
             });
+            if let Some(err) = &self.fatal {
+                ui.label(egui::RichText::new(err).color(egui::Color32::from_rgb(200, 40, 40)));
+            }
             ui.add_space(4.0);
         });
 
@@ -328,7 +337,7 @@ impl eframe::App for App {
             } else {
                 ui.label(egui::RichText::new("モデルが未準備です").color(egui::Color32::from_rgb(200, 120, 0)));
                 ui.label(egui::RichText::new("初回は基盤モデル（約 380MB）のダウンロードと声モデルの変換を行います。").small());
-                if ui.add_enabled(!self.running, egui::Button::new("モデルを準備")).clicked() {
+                if ui.add_enabled(!self.running && self.fatal.is_none(), egui::Button::new("モデルを準備")).clicked() {
                     self.start_prepare();
                 }
             }
@@ -401,7 +410,7 @@ impl eframe::App for App {
                             self.cancel.store(true, Ordering::SeqCst);
                         }
                     } else {
-                        let can_run = !self.files.is_empty();
+                        let can_run = !self.files.is_empty() && self.fatal.is_none();
                         let btn = egui::Button::new(egui::RichText::new("変換開始").strong());
                         if ui.add_enabled(can_run, btn).clicked() {
                             self.settings.save();

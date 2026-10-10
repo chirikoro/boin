@@ -19,9 +19,13 @@ Rust + ONNX Runtime で動作し、**Python や PyTorch のインストールは
 boin/
 ├── boin-gui(.exe)   # GUI
 ├── boin(.exe)       # CLI
+├── onnxruntime.dll  # Windows のみ: Microsoft 公式 ONNX Runtime（配布 zip に同梱）
+├── onnxruntime_providers_shared.dll
 ├── models/          # V2-AISO-*.pth を置く（初回に同名の .onnx を自動生成）
 └── assets/          # 基盤モデル（初回に自動ダウンロード）
 ```
+
+Windows 版は `onnxruntime.dll` を実行時に読み込みます。exe と同じフォルダに置いてください（環境変数 `ORT_DYLIB_PATH` で場所を指定することもできます）。
 
 ## 使い方（Windows）
 
@@ -39,7 +43,7 @@ boin/
 ### 処理デバイス
 
 - **CPU**（既定）: どの PC でも動きます。目安は実時間の 0.2〜0.5 倍（1 分の音声が 15〜30 秒）。
-- **GPU (DirectML)**: Windows で DirectX 12 対応 GPU がある場合に選べます。登録に失敗した場合は自動的に CPU で動きます。
+- **GPU (DirectML)**: 同梱の `onnxruntime.dll` は CPU 版のため、現状は選んでも CPU で動きます（登録失敗時は自動で CPU にフォールバック）。DirectML 対応版の ONNX Runtime（NuGet `Microsoft.ML.OnnxRuntime.DirectML`）の DLL に差し替えると有効になります。
 - **GPU (CoreML)**（macOS）: 手元の M4 Pro では CPU より遅かったため、Mac でも CPU 推奨です。
 
 ## CLI
@@ -58,14 +62,53 @@ boin.exe inspect models\V2-AISO-SARASARA.onnx   # ONNX の入出力表示
 
 ## ビルド（開発者向け）
 
-Rust ツールチェーンは `rust-toolchain.toml` で固定しています（rustup が自動で取得）。
+Rust ツールチェーンは `rust-toolchain.toml` で 1.98.1 に固定しています（rustup が自動で取得）。
+
+### macOS / Linux
 
 ```sh
 cargo build --release            # target/release/boin, boin-gui
 cargo test --workspace
 ```
 
-Windows 向けの配布 zip は GitHub Actions（`.github/workflows/build.yml`）が `windows-latest` で作成します。Windows PC 上で `cargo build --release` しても同じものが作れます（Visual Studio Build Tools の C++ ワークロードが必要）。
+ONNX Runtime はビルド時に pyke 配布の静的ライブラリを取得してリンクします。
+
+### Windows（MSVC 不要）
+
+Visual Studio や MSVC Build Tools は使いません。GNU ツールチェーン（MinGW-w64、rustup に同梱）でビルドします。
+
+```powershell
+# rustup を https://rustup.rs から導入する際に「Customize installation」で
+# default host triple を x86_64-pc-windows-gnu にするか、導入後に次を実行:
+rustup set default-host x86_64-pc-windows-gnu
+rustup toolchain install 1.98.1-x86_64-pc-windows-gnu
+
+cargo build --release            # target\release\boin.exe, boin-gui.exe
+```
+
+実行には Microsoft 公式の `onnxruntime.dll` が必要です。
+https://github.com/microsoft/onnxruntime/releases/tag/v1.28.0 の `onnxruntime-win-x64-1.28.0.zip` を展開し、`lib\onnxruntime.dll` と `lib\onnxruntime_providers_shared.dll` を exe の隣にコピーしてください。
+（SHA-256: zip `abef733dacbe2f571547a7150b479b5cb9cc0df22f96c24983a42cadb1b4f8bc`）
+
+テストを実行する場合は DLL の場所を環境変数で渡します:
+
+```powershell
+$env:ORT_DYLIB_PATH = "C:\path\to\onnxruntime.dll"
+cargo test --workspace --release
+```
+
+### Mac から Windows 版をクロスビルドする
+
+```sh
+brew install mingw-w64
+rustup target add x86_64-pc-windows-gnu
+CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc \
+  cargo build --release --workspace --target x86_64-pc-windows-gnu
+```
+
+### 配布 zip
+
+GitHub Actions（`.github/workflows/build.yml`）が Windows（GNU ツールチェーン）と macOS の zip を作成します。Windows 版には公式 `onnxruntime.dll` を SHA-256 検証のうえ同梱します。
 
 ## 仕組み
 

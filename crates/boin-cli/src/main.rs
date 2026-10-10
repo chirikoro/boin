@@ -91,6 +91,7 @@ fn main() -> Result<()> {
         Some(p) => Home::from_root(p),
         None => Home::detect(),
     };
+    boin_core::onnx::init_runtime(&home)?;
     match cli.command {
         Command::Setup {
             lite,
@@ -331,6 +332,13 @@ fn doctor(home: &Home) -> Result<()> {
     println!("boin {}", env!("CARGO_PKG_VERSION"));
     println!("OS: {} / {}", std::env::consts::OS, std::env::consts::ARCH);
     println!("ONNX Runtime: {}", boin_core::onnx::runtime_version());
+    if cfg!(windows) {
+        match boin_core::onnx::init_runtime(home) {
+            Ok(Some(p)) => println!("onnxruntime.dll: {}", p.display()),
+            Ok(None) => {}
+            Err(e) => println!("onnxruntime.dll: {e}"),
+        }
+    }
     println!(
         "利用可能デバイス: {}",
         Device::available()

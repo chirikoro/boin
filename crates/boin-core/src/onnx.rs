@@ -164,3 +164,49 @@ pub fn inspect(path: &Path) -> Result<ModelInfo> {
 pub fn runtime_version() -> String {
     ort::info().to_string()
 }
+
+/// Windows で動的ロードする `onnxruntime.dll` のファイル名。
+pub const ORT_DLL_NAME: &str = "onnxruntime.dll";
+
+/// Windows: 実行ファイルの隣（または BOIN_HOME）にある `onnxruntime.dll` を明示的に読み込む。
+/// 他の OS では何もしない。ONNX Runtime を使う前に 1 度呼ぶ。
+pub fn init_runtime(home: &crate::paths::Home) -> Result<Option<std::path::PathBuf>> {
+    #[cfg(windows)]
+    {
+        if let Ok(p) = std::env::var("ORT_DYLIB_PATH") {
+            if !p.is_empty() {
+                return Ok(Some(std::path::PathBuf::from(p)));
+            }
+        }
+        let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                candidates.push(dir.join(ORT_DLL_NAME));
+            }
+        }
+        candidates.push(home.root.join(ORT_DLL_NAME));
+        for c in &candidates {
+            if c.is_file() {
+                let builder = ort::init_from(c).map_err(|e| {
+                    anyhow::anyhow!("{} の読み込みに失敗しました: {e}", c.display())
+                })?;
+                builder.with_name("boin").commit();
+                return Ok(Some(c.clone()));
+            }
+        }
+        anyhow::bail!(
+            "onnxruntime.dll が見つかりません。次のいずれかに置いてください:\n{}\n\
+             （Microsoft 公式の onnxruntime-win-x64-1.28.0.zip 内 lib/onnxruntime.dll）",
+            candidates
+                .iter()
+                .map(|c| format!("  {}", c.display()))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = home;
+        Ok(None)
+    }
+}

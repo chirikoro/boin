@@ -10,7 +10,7 @@ anyhow.workspace = true
 tracing.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "download-binaries", "copy-dylibs", "tls-native"] }
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "tls-native"] }
 vc-convert = { path = "../vc-convert" }
 symphonia = { version = "0.6", default-features = false, features = ["mp3", "flac", "ogg", "vorbis", "wav", "pcm", "aac", "isomp4", "adpcm", "mkv", "aiff"] }
 hound = "3.5"
@@ -23,8 +23,14 @@ sha2 = "0.10"
 hex = "0.4"
 thiserror = "2"
 
-[target.'cfg(windows)'.dependencies]
-ort = { version = "=2.0.0-rc.13", default-features = false, features = ["directml"] }
+# macOS / Linux: pyke 配布の静的ライブラリをビルド時に取得してリンクする（MSVC 不要）。
+[target.'cfg(not(windows))'.dependencies]
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["download-binaries", "copy-dylibs"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["coreml"] }
+
+# Windows: GNU ツールチェーン（MinGW-w64）でビルドできるよう、Microsoft 公式の onnxruntime.dll を
+# 実行時に動的ロードする。ビルドに MSVC は不要。DLL は exe と同じフォルダに置く。
+[target.'cfg(windows)'.dependencies]
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["load-dynamic", "directml"] }

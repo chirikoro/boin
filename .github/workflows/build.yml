@@ -9,57 +9,96 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Microsoft 公式 ONNX Runtime（Windows の実行時に動的ロードする）
+  ORT_VERSION: "1.28.0"
+  ORT_WIN_ZIP_SHA256: "abef733dacbe2f571547a7150b479b5cb9cc0df22f96c24983a42cadb1b4f8bc"
 
 jobs:
-  build:
-    name: ${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: windows-x64
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
-            bins: "boin.exe boin-gui.exe"
-          - name: macos-arm64
-            os: macos-latest
-            target: aarch64-apple-darwin
-            bins: "boin boin-gui"
+  windows:
+    name: windows-x64 (GNU toolchain, no MSVC)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust (GNU host, no MSVC)
+        run: |
+          rustup set default-host x86_64-pc-windows-gnu
+          rustup toolchain install 1.98.1-x86_64-pc-windows-gnu --profile minimal
+          rustup default 1.98.1-x86_64-pc-windows-gnu
+          rustc -vV
+      - uses: Swatinem/rust-cache@v2
+      - name: Fetch ONNX Runtime ${{ env.ORT_VERSION }} (official, MIT)
+        run: |
+          set -euo pipefail
+          curl -sSL -o ort.zip "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-win-x64-${ORT_VERSION}.zip"
+          echo "${ORT_WIN_ZIP_SHA256}  ort.zip" | sha256sum -c -
+          7z x -y -oort ort.zip >/dev/null
+          mkdir -p ortlib
+          cp ort/onnxruntime-win-x64-${ORT_VERSION}/lib/onnxruntime.dll ortlib/
+          cp ort/onnxruntime-win-x64-${ORT_VERSION}/lib/onnxruntime_providers_shared.dll ortlib/
+          cp ort/onnxruntime-win-x64-${ORT_VERSION}/LICENSE ortlib/LICENSE-onnxruntime.txt
+          echo "ORT_DYLIB_PATH=$(pwd -W)/ortlib/onnxruntime.dll" >> "$GITHUB_ENV"
+      - name: Test
+        run: cargo test --workspace --release
+      - name: Build
+        run: cargo build --workspace --release
+      - name: Package
+        run: |
+          set -euo pipefail
+          out="dist/boin-windows-x64"
+          mkdir -p "$out/models" "$out/assets"
+          cp target/release/boin.exe target/release/boin-gui.exe "$out/"
+          cp ortlib/onnxruntime.dll ortlib/onnxruntime_providers_shared.dll ortlib/LICENSE-onnxruntime.txt "$out/"
+          cp README.ja.md LICENSE crates/vc-convert/LICENSE-vc-rs crates/boin-gui/assets/OFL-BIZUDPGothic.txt "$out/"
+          echo "models/ に V2-AISO-*.pth を置いてください（.onnx は初回起動時に自動生成されます）" > "$out/models/README.txt"
+          echo "assets/ には初回起動時に基盤モデル（ContentVec）が自動ダウンロードされます" > "$out/assets/README.txt"
+          (cd dist && 7z a -tzip boin-windows-x64.zip boin-windows-x64 >/dev/null)
+      - name: Smoke test (doctor)
+        run: |
+          cd dist/boin-windows-x64
+          unset ORT_DYLIB_PATH
+          ./boin.exe doctor
+      - uses: actions/upload-artifact@v4
+        with:
+          name: boin-windows-x64
+          path: dist/boin-windows-x64.zip
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/boin-windows-x64.zip
+
+  macos:
+    name: macos-arm64
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.98.1"
-          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - name: Test
-        run: cargo test --workspace --release --target ${{ matrix.target }}
+        run: cargo test --workspace --release
       - name: Build
-        run: cargo build --workspace --release --target ${{ matrix.target }}
+        run: cargo build --workspace --release
       - name: Package
-        shell: bash
         run: |
           set -euo pipefail
-          out="dist/boin-${{ matrix.name }}"
+          out="dist/boin-macos-arm64"
           mkdir -p "$out/models" "$out/assets"
-          for b in ${{ matrix.bins }}; do cp "target/${{ matrix.target }}/release/$b" "$out/"; done
-          # ONNX Runtime の共有ライブラリが隣に生成される構成（copy-dylibs）に備えてコピーする
-          shopt -s nullglob
-          cp target/${{ matrix.target }}/release/*.dll target/${{ matrix.target }}/release/*.dylib "$out/" 2>/dev/null || true
-          cp README.ja.md "$out/"
-          cp crates/boin-gui/assets/OFL-BIZUDPGothic.txt "$out/"
-          cp crates/vc-convert/LICENSE-vc-rs "$out/"
-          cp LICENSE "$out/" 2>/dev/null || true
+          cp target/release/boin target/release/boin-gui "$out/"
+          cp README.ja.md LICENSE crates/vc-convert/LICENSE-vc-rs crates/boin-gui/assets/OFL-BIZUDPGothic.txt "$out/"
           echo "models/ に V2-AISO-*.pth を置いてください（.onnx は初回起動時に自動生成されます）" > "$out/models/README.txt"
           echo "assets/ には初回起動時に基盤モデル（ContentVec）が自動ダウンロードされます" > "$out/assets/README.txt"
-          (cd dist && 7z a -tzip "boin-${{ matrix.name }}.zip" "boin-${{ matrix.name }}" >/dev/null)
+          (cd dist && zip -qr boin-macos-arm64.zip boin-macos-arm64)
       - uses: actions/upload-artifact@v4
         with:
-          name: boin-${{ matrix.name }}
-          path: dist/boin-${{ matrix.name }}.zip
+          name: boin-macos-arm64
+          path: dist/boin-macos-arm64.zip
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/boin-${{ matrix.name }}.zip
+          files: dist/boin-macos-arm64.zip
