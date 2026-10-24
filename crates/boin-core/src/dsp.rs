@@ -197,7 +197,8 @@ pub fn mel_filterbank_scaled(
     let fftfreqs: Vec<f64> = (0..bins)
         .map(|i| i as f64 * sr as f64 / n_fft as f64)
         .collect();
-    let (to_mel, to_hz): (fn(f64) -> f64, fn(f64) -> f64) = match scale {
+    type HzFn = fn(f64) -> f64;
+    let (to_mel, to_hz): (HzFn, HzFn) = match scale {
         MelScale::Slaney => (hz_to_mel_slaney, mel_to_hz_slaney),
         MelScale::Htk => (hz_to_mel_htk, mel_to_hz_htk),
     };
