@@ -58,8 +58,11 @@ PYTORCH_ENABLE_MPS_FALLBACK=1 .venv/bin/python core.py prerequisites --pretraine
   train/Applio/logs/fem_b/fem_b_300e_9000s.pth 0.5
 ```
 
-比率 0.0〜1.0 で混ぜ具合を変えられる（0.5 が中間）。結果は `train/Applio/logs/fem_blend.pth`。
+比率は **1 つ目のモデルの重み**（0.0〜1.0、0.1 刻み）。0.7 なら話者 1 が 7 割、話者 2 が 3 割。
+結果は `train/Applio/logs/<新モデル名>.pth`。
 気に入る比率が見つかるまで何度でも作り直せる（学習は不要、数秒で終わる）。
+単体の話者も `train/Applio/logs/fem_a/fem_a_300e_14700s.pth` をそのまま `models/fem_a.pth` に
+コピーすれば使える。
 
 ## 5. boin で使う
 

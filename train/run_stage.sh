@@ -28,7 +28,9 @@ case "$STAGE" in
     $PY core.py train --model-name "$MODEL" --sample-rate $SR --gpu 0 --total-epoch "$EPOCHS" \
       --batch-size "$BS" --save-every-epoch "$SAVE" --save-only-latest --vocoder HiFi-GAN --pretrained --index-algorithm Auto ;;
   blend)
-    NEW="$1"; P1="$2"; P2="$3"; RATIO="$4"
-    $PY core.py model_blender --model-name "$NEW" --pth-path-1 "$P1" --pth-path-2 "$P2" --ratio "$RATIO" ;;
+    NEW="$1"; RATIO="$4"
+    P1="$(cd "$ORIG" && cd "$(dirname "$2")" && pwd)/$(basename "$2")"
+    P2="$(cd "$ORIG" && cd "$(dirname "$3")" && pwd)/$(basename "$3")"
+    $PY core.py model-blender --model-name "$NEW" --pth-path-1 "$P1" --pth-path-2 "$P2" --ratio "$RATIO" ;;
   *) echo "unknown stage: $STAGE"; exit 2 ;;
 esac
