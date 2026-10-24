@@ -72,7 +72,7 @@ pub fn spawn_prepare(home: Home, settings: Settings) -> Receiver<Msg> {
     std::thread::spawn(move || {
         let mut cb = |p: Progress| prep_progress(&tx, p);
         let result = prepare::ensure_base_models(&home, settings.lite, false, &mut cb)
-            .and_then(|_| prepare::ensure_voice_onnx(&home, settings.voice, &mut cb).map(|_| ()));
+            .and_then(|_| prepare::ensure_voice_onnx(&home, &settings.voice, &mut cb).map(|_| ()));
         let summary = match result {
             Ok(()) => "モデルの準備が完了しました".to_owned(),
             Err(e) => {
@@ -123,12 +123,12 @@ fn run_convert(
         text: format!("{} を読み込み中…", settings.voice.display_ja()),
         frac: None,
     });
-    if let Err(e) = conv.load_voice(settings.voice, &mut cb) {
+    if let Err(e) = conv.load_voice(settings.voice.clone(), &mut cb) {
         let _ = tx.send(Msg::Log(format!("エラー: {e:#}")));
         return format!("声モデルの読み込みに失敗しました: {e}");
     }
     let opts = ConvertOptions {
-        voice: settings.voice,
+        voice: settings.voice.clone(),
         output_sample_rate: settings.output_sr,
         ..Default::default()
     };

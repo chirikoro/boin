@@ -162,16 +162,49 @@ fn mel_to_hz_slaney(m: f64) -> f64 {
     }
 }
 
+/// メル尺度の種類（librosa の `htk` 引数に対応）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MelScale {
+    /// librosa 既定（1000Hz 以下が線形、以上が対数）。
+    Slaney,
+    /// HTK 式 `2595 * log10(1 + f / 700)`。RMVPE の mel 抽出器はこちらを使う。
+    Htk,
+}
+
+fn hz_to_mel_htk(f: f64) -> f64 {
+    2595.0 * (1.0 + f / 700.0).log10()
+}
+
+fn mel_to_hz_htk(m: f64) -> f64 {
+    700.0 * (10f64.powf(m / 2595.0) - 1.0)
+}
+
 /// librosa.filters.mel(sr, n_fft, n_mels, fmin, fmax, htk=False, norm="slaney") 相当。[n_mels][bins]
 pub fn mel_filterbank(sr: u32, n_fft: usize, n_mels: usize, fmin: f64, fmax: f64) -> Vec<f32> {
+    mel_filterbank_scaled(sr, n_fft, n_mels, fmin, fmax, MelScale::Slaney)
+}
+
+/// `mel_filterbank` のメル尺度指定版（norm は常に "slaney" の面積正規化）。[n_mels][bins]
+pub fn mel_filterbank_scaled(
+    sr: u32,
+    n_fft: usize,
+    n_mels: usize,
+    fmin: f64,
+    fmax: f64,
+    scale: MelScale,
+) -> Vec<f32> {
     let bins = n_fft / 2 + 1;
     let fftfreqs: Vec<f64> = (0..bins)
         .map(|i| i as f64 * sr as f64 / n_fft as f64)
         .collect();
-    let m_min = hz_to_mel_slaney(fmin);
-    let m_max = hz_to_mel_slaney(fmax);
+    let (to_mel, to_hz): (fn(f64) -> f64, fn(f64) -> f64) = match scale {
+        MelScale::Slaney => (hz_to_mel_slaney, mel_to_hz_slaney),
+        MelScale::Htk => (hz_to_mel_htk, mel_to_hz_htk),
+    };
+    let m_min = to_mel(fmin);
+    let m_max = to_mel(fmax);
     let mel_f: Vec<f64> = (0..n_mels + 2)
-        .map(|i| mel_to_hz_slaney(m_min + (m_max - m_min) * i as f64 / (n_mels + 1) as f64))
+        .map(|i| to_hz(m_min + (m_max - m_min) * i as f64 / (n_mels + 1) as f64))
         .collect();
     let mut weights = vec![0.0f32; n_mels * bins];
     for i in 0..n_mels {
@@ -188,7 +221,8 @@ pub fn mel_filterbank(sr: u32, n_fft: usize, n_mels: usize, fmin: f64, fmax: f64
     weights
 }
 
-/// RMVPE 用 log-mel 抽出器（n_fft 1024, hop 160, 128 mel, 30–8000Hz, clamp 1e-5）。
+/// RMVPE 用 log-mel 抽出器（n_fft 1024, hop 160, 128 mel, 30–8000Hz, **HTK メル尺度**, clamp 1e-5）。
+/// RMVPE の `MelSpectrogram` は `librosa.filters.mel(..., htk=True)` を使う点に注意。
 pub struct LogMel {
     stft: Stft,
     fb: Vec<f32>,
@@ -198,7 +232,7 @@ pub struct LogMel {
 impl LogMel {
     pub fn rmvpe() -> LogMel {
         let stft = Stft::new(1024, 160);
-        let fb = mel_filterbank(16000, 1024, 128, 30.0, 8000.0);
+        let fb = mel_filterbank_scaled(16000, 1024, 128, 30.0, 8000.0, MelScale::Htk);
         LogMel {
             stft,
             fb,
@@ -241,6 +275,31 @@ impl LogMel {
 #[allow(clippy::excessive_precision)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn htk_mel_matches_librosa_reference() {
+        // librosa.filters.mel(sr=16000, n_fft=1024, n_mels=128, fmin=30, fmax=8000, htk=True) の参照値
+        let fb = mel_filterbank_scaled(16000, 1024, 128, 30.0, 8000.0, MelScale::Htk);
+        let bins = 513;
+        let row0 = &fb[0..bins];
+        let nz: Vec<usize> = (0..bins).filter(|&j| row0[j] > 0.0).collect();
+        assert_eq!(nz, vec![2, 3]);
+        assert!((row0[2] - 0.00617564).abs() < 1e-6, "{}", row0[2]);
+        assert!((row0[3] - 0.05678504).abs() < 1e-6, "{}", row0[3]);
+        let argmax = |r: &[f32]| {
+            r.iter()
+                .enumerate()
+                .fold((0, 0.0f32), |a, (i, &v)| if v > a.1 { (i, v) } else { a })
+        };
+        let (i64_, m64) = argmax(&fb[64 * bins..65 * bins]);
+        assert_eq!(i64_, 118);
+        assert!((m64 - 0.020166064).abs() < 1e-6, "{m64}");
+        let (i127, m127) = argmax(&fb[127 * bins..128 * bins]);
+        assert_eq!(i127, 501);
+        assert!((m127 - 0.0058608907).abs() < 1e-6, "{m127}");
+        let total: f32 = fb.iter().sum();
+        assert!((total - 8.189247).abs() < 1e-3, "{total}");
+    }
 
     #[test]
     fn mel_matches_librosa_reference() {
@@ -286,5 +345,31 @@ mod tests {
         let x = vec![0.0f32; 16000];
         let (_, frames) = s.magnitude(&x);
         assert_eq!(frames, 101);
+    }
+}
+
+#[cfg(test)]
+mod dump_tests {
+    use super::*;
+
+    /// 開発用: BOIN_DUMP_MEL_WAV の音声（16kHz）の log-mel を BOIN_DUMP_MEL_OUT に f32 LE で書き出す。
+    #[test]
+    #[ignore]
+    fn dump_logmel() {
+        let wav = std::env::var("BOIN_DUMP_MEL_WAV").unwrap();
+        let out = std::env::var("BOIN_DUMP_MEL_OUT").unwrap();
+        let mono = crate::audio::decode(std::path::Path::new(&wav)).unwrap();
+        assert_eq!(mono.sample_rate, 16000);
+        let lm = LogMel::rmvpe();
+        let (mel, frames) = lm.compute(&mono.samples);
+        let bytes: Vec<u8> = mel.iter().flat_map(|v| v.to_le_bytes()).collect();
+        std::fs::write(&out, bytes).unwrap();
+        eprintln!("DUMP n_mels={} frames={}", lm.n_mels(), frames);
+        let fb = mel_filterbank(16000, 1024, 128, 30.0, 8000.0);
+        let bytes: Vec<u8> = fb.iter().flat_map(|v| v.to_le_bytes()).collect();
+        std::fs::write(format!("{out}.fb"), bytes).unwrap();
+        let (mag, _) = Stft::new(1024, 160).magnitude(&mono.samples);
+        let bytes: Vec<u8> = mag.iter().flat_map(|v| v.to_le_bytes()).collect();
+        std::fs::write(format!("{out}.mag"), bytes).unwrap();
     }
 }

@@ -141,10 +141,10 @@ impl Converter {
         voice: Voice,
         progress: &mut dyn FnMut(prepare::Progress),
     ) -> Result<()> {
-        if self.generator.as_ref().map(|g| g.voice) == Some(voice) {
+        if self.generator.as_ref().map(|g| &g.voice) == Some(&voice) {
             return Ok(());
         }
-        let onnx = prepare::ensure_voice_onnx(&self.home, voice, progress)?;
+        let onnx = prepare::ensure_voice_onnx(&self.home, &voice, progress)?;
         let session = build_session(&onnx, self.device, self.threads)?;
         let needs_f0 = validate_generator(&session)?;
         if needs_f0 && self.rmvpe.is_none() {
@@ -166,6 +166,33 @@ impl Converter {
         Ok(())
     }
 
+    /// 音声全体の F0（Hz、無声は 0）を RMVPE で推定して返す。デバッグ・確認用。
+    /// 変換時と同じ前処理（16kHz 化、前後 1 秒反射パディング）を行い、パディング分を除いて返す。
+    pub fn estimate_f0(
+        &mut self,
+        mono: &Mono,
+        progress: &mut dyn FnMut(prepare::Progress),
+    ) -> Result<Vec<f32>> {
+        if self.rmvpe.is_none() {
+            let rmvpe_path = prepare::RMVPE.path(&self.home);
+            if !rmvpe_path.is_file() {
+                prepare::download_verified(&prepare::RMVPE, &rmvpe_path, progress)?;
+            }
+            let rmvpe = build_session(&rmvpe_path, self.device, self.threads)?;
+            validate_rmvpe(&rmvpe)?;
+            self.rmvpe = Some(rmvpe);
+        }
+        let audio16 = audio::resample(&mono.samples, mono.sample_rate, SR as u32);
+        let t_pad = SR * X_PAD;
+        let audio_pad = reflect_pad(&audio16, t_pad, t_pad);
+        let p_len = audio_pad.len() / WINDOW;
+        let opts = ConvertOptions::default();
+        let (_, f0) = self.get_f0(&audio_pad, p_len, &opts)?;
+        let skip = t_pad / WINDOW;
+        let keep = (audio16.len() / WINDOW).min(f0.len().saturating_sub(skip));
+        Ok(f0[skip..skip + keep].to_vec())
+    }
+
     /// 現在の声モデルがピッチ（F0）を使うか。
     pub fn current_voice_uses_f0(&self) -> Option<bool> {
         self.generator.as_ref().map(|g| g.needs_f0)
@@ -173,7 +200,7 @@ impl Converter {
 
     /// 現在読み込んでいる声モデル。
     pub fn current_voice(&self) -> Option<Voice> {
-        self.generator.as_ref().map(|g| g.voice)
+        self.generator.as_ref().map(|g| g.voice.clone())
     }
 
     /// ファイルを変換して WAV に書き出す。
@@ -185,8 +212,8 @@ impl Converter {
         progress: &mut dyn FnMut(Stage),
     ) -> Result<ConvertReport> {
         let started = Instant::now();
-        progress(Stage::LoadModel(opts.voice));
-        self.load_voice(opts.voice, &mut |_| {})?;
+        progress(Stage::LoadModel(opts.voice.clone()));
+        self.load_voice(opts.voice.clone(), &mut |_| {})?;
         progress(Stage::Decode);
         let mono = audio::decode(input)?;
         let (samples, sr, segments) = self.convert_samples(&mono, opts, progress)?;
@@ -208,7 +235,7 @@ impl Converter {
         opts: &ConvertOptions,
         progress: &mut dyn FnMut(Stage),
     ) -> Result<(Vec<f32>, u32, usize)> {
-        self.load_voice(opts.voice, &mut |_| {})?;
+        self.load_voice(opts.voice.clone(), &mut |_| {})?;
         let tgt_sr = self
             .generator
             .as_ref()

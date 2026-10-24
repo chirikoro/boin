@@ -28,7 +28,7 @@ enum Command {
         /// int8 量子化版の ContentVec を使う（軽量・やや低精度）
         #[arg(long)]
         lite: bool,
-        /// 特定の声モデルだけ変換する（省略時は 5 つ全て）
+        /// 特定の声モデルだけ変換する（省略時は models/ 内の全モデル）
         #[arg(short = 'm', long)]
         model: Option<String>,
         /// RMVPE（ピッチ推定）も取得する。同梱の 5 モデルはピッチ無しのため通常不要
@@ -40,7 +40,7 @@ enum Command {
         /// 入力ファイル（複数可: wav/mp3/flac/ogg/m4a など）
         #[arg(required = true)]
         inputs: Vec<PathBuf>,
-        /// 声モデル: sarasara / howatto / kakkoii / sittori / syakitto
+        /// 声モデル: sarasara / howatto / kakkoii / sittori / syakitto、または models/ に置いた追加 .pth のファイル名
         #[arg(short = 'm', long, default_value = "sarasara")]
         model: String,
         /// ピッチ変更（半音）。+12 で 1 オクターブ上
@@ -77,6 +77,14 @@ enum Command {
     Inspect { path: PathBuf },
     /// 実行環境を診断する
     Doctor,
+    /// 音声のピッチ（F0）を RMVPE で推定して統計を表示する（ピッチ推定の確認用）
+    F0 {
+        /// 入力ファイル
+        input: PathBuf,
+        /// 10ms ごとの F0 を CSV で書き出す先（任意）
+        #[arg(long)]
+        csv: Option<PathBuf>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -111,7 +119,9 @@ fn main() -> Result<()> {
             seed,
             overwrite,
         } => {
-            let voice = Voice::parse(&model).with_context(|| format!("不明な声モデル: {model}"))?;
+            let voice = Voice::parse(&home, &model).with_context(|| {
+                format!("不明な声モデル: {model}（`boin models` で一覧を確認）")
+            })?;
             let device =
                 Device::parse(&device).with_context(|| format!("不明なデバイス: {device}"))?;
             let opts = ConvertOptions {
@@ -136,6 +146,7 @@ fn main() -> Result<()> {
         Command::Models => models(&home),
         Command::Inspect { path } => inspect(&path),
         Command::Doctor => doctor(&home),
+        Command::F0 { input, csv } => f0_stats(&home, &input, csv.as_deref()),
     }
 }
 
@@ -166,19 +177,20 @@ fn setup(home: &Home, lite: bool, with_rmvpe: bool, model: Option<&str>) -> Resu
     prepare::ensure_base_models(home, lite, with_rmvpe, &mut print_progress)?;
     println!("[2/2] 声モデルの ONNX 変換");
     let voices: Vec<Voice> = match model {
-        Some(m) => vec![Voice::parse(m).with_context(|| format!("不明な声モデル: {m}"))?],
-        None => Voice::ALL.to_vec(),
+        Some(m) => vec![Voice::parse(home, m)
+            .with_context(|| format!("不明な声モデル: {m}（`boin models` で一覧を確認）"))?],
+        None => Voice::discover(home),
     };
     for v in voices {
         if !v.pth_path(home).is_file() {
             println!("  スキップ（.pth なし）: {}", v.pth_path(home).display());
             continue;
         }
-        if prepare::voice_onnx_ready(home, v) {
+        if prepare::voice_onnx_ready(home, &v) {
             println!("  準備済み: {}", v.file_stem());
             continue;
         }
-        prepare::ensure_voice_onnx(home, v, &mut print_progress)?;
+        prepare::ensure_voice_onnx(home, &v, &mut print_progress)?;
     }
     println!("セットアップ完了");
     Ok(())
@@ -195,7 +207,7 @@ fn convert(
     overwrite: bool,
     opts: &ConvertOptions,
 ) -> Result<()> {
-    if !prepare::is_ready(home, opts.voice, lite) {
+    if !prepare::is_ready(home, &opts.voice, lite) {
         println!("モデルが未準備のため、先にセットアップを行います。");
         setup(home, lite, false, Some(opts.voice.id()))?;
     }
@@ -206,7 +218,7 @@ fn convert(
         opts.voice.display_ja()
     );
     let mut conv = Converter::new(home, device, lite, threads)?;
-    conv.load_voice(opts.voice, &mut print_progress)?;
+    conv.load_voice(opts.voice.clone(), &mut print_progress)?;
     if conv.current_voice_uses_f0() == Some(false) && opts.pitch_semitones != 0.0 {
         eprintln!(
             "注意: {} はピッチ無しモデルのため --pitch は無視されます",
@@ -220,7 +232,7 @@ fn convert(
             failures += 1;
             continue;
         }
-        let output = output_path(input, out_dir, opts.voice);
+        let output = output_path(input, out_dir, &opts.voice);
         if output.exists() && !overwrite {
             eprintln!(
                 "スキップ（既に存在。--overwrite で上書き）: {}",
@@ -264,7 +276,44 @@ fn convert(
     Ok(())
 }
 
-fn output_path(input: &Path, out_dir: Option<&Path>, voice: Voice) -> PathBuf {
+fn f0_stats(home: &Home, input: &Path, csv: Option<&Path>) -> Result<()> {
+    let mono = boin_core::audio::decode(input)?;
+    let mut conv = Converter::new(home, Device::Cpu, true, boin_core::onnx::default_threads())?;
+    let f0 = conv.estimate_f0(&mono, &mut print_progress)?;
+    let mut voiced: Vec<f32> = f0.iter().copied().filter(|v| *v > 0.0).collect();
+    voiced.sort_by(|a, b| a.total_cmp(b));
+    let pct = |p: f64| -> f32 {
+        if voiced.is_empty() {
+            0.0
+        } else {
+            voiced[((voiced.len() - 1) as f64 * p).round() as usize]
+        }
+    };
+    println!(
+        "{}: {:.2} 秒, フレーム {} (10ms), 有声率 {:.0}%",
+        input.display(),
+        mono.duration_secs(),
+        f0.len(),
+        100.0 * voiced.len() as f64 / f0.len().max(1) as f64
+    );
+    println!(
+        "F0 (Hz): 25%={:.0} 中央値={:.0} 75%={:.0}",
+        pct(0.25),
+        pct(0.5),
+        pct(0.75)
+    );
+    if let Some(csv) = csv {
+        let mut s = String::from("time_sec,f0_hz\n");
+        for (i, v) in f0.iter().enumerate() {
+            s.push_str(&format!("{:.3},{:.2}\n", i as f64 * 0.01, v));
+        }
+        std::fs::write(csv, s)?;
+        println!("CSV: {}", csv.display());
+    }
+    Ok(())
+}
+
+fn output_path(input: &Path, out_dir: Option<&Path>, voice: &Voice) -> PathBuf {
     let stem = input
         .file_stem()
         .and_then(|s| s.to_str())

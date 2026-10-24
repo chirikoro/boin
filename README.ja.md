@@ -79,6 +79,17 @@ boin.exe inspect models\V2-AISO-SARASARA.onnx   # ONNX の入出力表示
 
 主なオプション: `-m/--model`（sarasara/howatto/kakkoii/sittori/syakitto）、`-o/--out-dir`、`--device cpu|directml|coreml`、`--output-sr`、`--rms-mix-rate 0〜1`（入力の音量エンベロープを混ぜる）、`--lite`（int8 量子化版 ContentVec、約 95MB）、`--threads`、`--seed`。
 
+## 追加モデル（自前で学習した .pth）
+
+`models/` フォルダに RVC v2 の `.pth` を置くと、GUI の声モデル一覧（「再読込」ボタン）と `boin models` にファイル名で現れ、初回選択時に自動で ONNX 化されます。F0 あり（ピッチ付き）のモデルなら `-p`（半音）のピッチ変更も効きます（RMVPE を初回に自動取得）。
+
+```powershell
+copy fem_blend.pth models\
+boin.exe convert input.wav -m fem_blend -p 2
+```
+
+Mac（Apple Silicon）で自前の声を学習し、2 つの声を混ぜて架空の声を作る手順は [train/README.md](train/README.md) を参照してください。
+
 ## ビルド（開発者向け）
 
 Rust ツールチェーンは `rust-toolchain.toml` で 1.98.1 に固定しています（rustup が自動で取得）。

@@ -8,3 +8,6 @@
 *.wav
 !crates/**/*.wav
 .DS_Store
+/train/Applio
+/train/datasets
+/train/*.log

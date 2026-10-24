@@ -86,13 +86,16 @@ struct App {
     log: Vec<String>,
     ready: bool,
     status_line: String,
+    /// models/ から見つかった声モデル（同梱 5 つ＋追加 .pth）。
+    voices: Vec<Voice>,
 }
 
 impl App {
     fn new() -> App {
         let home = Home::detect();
         let settings = Settings::load();
-        let ready = prepare::is_ready(&home, settings.voice, settings.lite);
+        let ready = prepare::is_ready(&home, &settings.voice, settings.lite);
+        let voices = Voice::discover(&home);
         let fatal = boin_core::onnx::init_runtime(&home)
             .err()
             .map(|e| format!("{e:#}"));
@@ -109,6 +112,7 @@ impl App {
             log: Vec::new(),
             ready,
             status_line: String::new(),
+            voices,
         }
     }
 
@@ -216,7 +220,8 @@ impl App {
             self.running = false;
             self.progress_frac = None;
             self.progress_text.clear();
-            self.ready = prepare::is_ready(&self.home, self.settings.voice, self.settings.lite);
+            self.ready = prepare::is_ready(&self.home, &self.settings.voice, self.settings.lite);
+            self.voices = Voice::discover(&self.home);
         }
     }
 }
@@ -237,7 +242,7 @@ impl eframe::App for App {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         } else {
             // 設定（声モデル / 軽量モード）の変更に応じて準備状況を更新する
-            self.ready = prepare::is_ready(&self.home, self.settings.voice, self.settings.lite);
+            self.ready = prepare::is_ready(&self.home, &self.settings.voice, self.settings.lite);
         }
 
         // ドラッグ&ドロップ
@@ -268,13 +273,27 @@ impl eframe::App for App {
         egui::Panel::left("settings").default_size(270.0).min_size(250.0).show(ui, |ui| {
             ui.add_space(8.0);
             ui.add_enabled_ui(!self.running, |ui| {
-                ui.label("声モデル");
+                ui.horizontal(|ui| {
+                    ui.label("声モデル");
+                    if ui
+                        .small_button("再読込")
+                        .on_hover_text("models/ フォルダに追加した .pth を一覧に反映します")
+                        .clicked()
+                    {
+                        self.voices = Voice::discover(&self.home);
+                    }
+                });
                 egui::ComboBox::from_id_salt("voice")
                     .width(220.0)
                     .selected_text(self.settings.voice.display_ja())
                     .show_ui(ui, |ui| {
-                        for v in Voice::ALL {
-                            ui.selectable_value(&mut self.settings.voice, v, v.display_ja());
+                        for v in &self.voices {
+                            let label = if v.is_builtin() {
+                                v.display_ja().to_owned()
+                            } else {
+                                format!("{}（追加）", v.display_ja())
+                            };
+                            ui.selectable_value(&mut self.settings.voice, v.clone(), label);
                         }
                     });
                 ui.add_space(8.0);

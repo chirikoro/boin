@@ -1,0 +1,14 @@
+diff --git a/rvc/train/extract/extract.py b/rvc/train/extract/extract.py
+index 29475e3..8925551 100644
+--- a/rvc/train/extract/extract.py
++++ b/rvc/train/extract/extract.py
+@@ -245,8 +245,8 @@ def process_file_embedding(
+             return
+         feats = (
+             torch.from_numpy(load_audio(wav_file_path, SAMPLE_RATE_16K))
+-            .to(device)
+             .float()
++            .to(device)
+         )
+         feats = feats.view(1, -1)
+         with torch.no_grad():

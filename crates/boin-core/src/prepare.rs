@@ -89,7 +89,7 @@ fn mtime(p: &Path) -> Option<u64> {
 }
 
 /// 声モデルの ONNX が最新か（存在し、.pth より新しいか）。
-pub fn voice_onnx_ready(home: &Home, voice: Voice) -> bool {
+pub fn voice_onnx_ready(home: &Home, voice: &Voice) -> bool {
     let pth = voice.pth_path(home);
     let onnx = voice.onnx_path(home);
     match (onnx.is_file(), mtime(&pth), mtime(&onnx)) {
@@ -102,7 +102,7 @@ pub fn voice_onnx_ready(home: &Home, voice: Voice) -> bool {
 /// `.pth` から `.onnx` を生成（必要な場合のみ）。純 Rust（vc-convert）で変換する。
 pub fn ensure_voice_onnx(
     home: &Home,
-    voice: Voice,
+    voice: &Voice,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<PathBuf> {
     let onnx = voice.onnx_path(home);
@@ -123,7 +123,7 @@ pub fn ensure_voice_onnx(
     };
     let mut report = |stage: vc_convert::ProgressStage| {
         progress(Progress::Convert {
-            voice,
+            voice: voice.clone(),
             stage: stage.label().to_string(),
         })
     };
@@ -267,14 +267,18 @@ pub fn status(home: &Home) -> Status {
             .iter()
             .map(|m| (*m, m.exists(home)))
             .collect(),
-        voices: Voice::ALL
-            .iter()
-            .map(|v| (*v, v.pth_path(home).is_file(), voice_onnx_ready(home, *v)))
+        voices: Voice::discover(home)
+            .into_iter()
+            .map(|v| {
+                let has_pth = v.pth_path(home).is_file();
+                let ready = voice_onnx_ready(home, &v);
+                (v, has_pth, ready)
+            })
             .collect(),
     }
 }
 
 /// 変換に必要なものが揃っているか（RMVPE は F0 ありモデルの読込時に遅延取得するため含めない）。
-pub fn is_ready(home: &Home, voice: Voice, lite: bool) -> bool {
+pub fn is_ready(home: &Home, voice: &Voice, lite: bool) -> bool {
     embedder_model(lite).exists(home) && voice_onnx_ready(home, voice)
 }
