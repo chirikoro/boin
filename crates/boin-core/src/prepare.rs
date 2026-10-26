@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, UNIX_EPOCH};
 
 /// ダウンロードが必要な基盤モデル。
 #[derive(Clone, Copy, Debug)]
@@ -165,9 +165,31 @@ pub fn download_verified(
     }
     let tmp = dest.with_extension("onnx.part");
     {
-        let mut resp = ureq::get(model.url)
-            .call()
-            .with_context(|| format!("{} のダウンロード開始に失敗", model.url))?;
+        // 接続待ちの間も UI に「何を待っているか」を出す。
+        progress(Progress::Download {
+            file: model.file.to_string(),
+            done: 0,
+            total: model.bytes,
+        });
+        // 既定のままだと遮断されたネットワークで無期限に待つので、接続系にはタイムアウトを付ける。
+        // 本体の受信はサイズが大きく回線次第なので無期限のまま。
+        let agent = ureq::Agent::config_builder()
+            .timeout_resolve(Some(Duration::from_secs(15)))
+            .timeout_connect(Some(Duration::from_secs(20)))
+            .timeout_send_request(Some(Duration::from_secs(20)))
+            .timeout_recv_response(Some(Duration::from_secs(60)))
+            .build()
+            .new_agent();
+        let mut resp = agent.get(model.url).call().with_context(|| {
+            format!(
+                "{} のダウンロードを開始できません（{}）。\n\
+                 インターネットに出られない PC では、別の PC で取得した {} を {} に置いてください。",
+                model.file,
+                model.url,
+                model.file,
+                dest.display()
+            )
+        })?;
         let total = resp
             .headers()
             .get("content-length")

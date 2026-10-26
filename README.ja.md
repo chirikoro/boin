@@ -57,7 +57,7 @@ Windows 版は `onnxruntime.dll` を実行時に読み込みます。exe と同�
 3. 音声ファイルをウィンドウにドロップ（またはボタンで追加）し、声モデルを選んで「変換開始」。
 4. 変換結果は `元ファイル名_モデル名.wav`（16bit / 40kHz）として、既定では入力と同じフォルダに保存されます。
 
-インターネット接続が無い PC で使う場合は、別の PC で `assets/contentvec_768l12.onnx` と `models/*.onnx` を作って一緒にコピーしてください。
+インターネット接続が無い PC で使う場合は、別の PC で `assets/contentvec_768l12.onnx` と `models/*.onnx` を作って一緒にコピーしてください。ピッチ付き（F0 あり）の追加モデルを使うなら `assets/rmvpe.onnx` も必要です。
 
 ### 処理デバイス
 
@@ -81,7 +81,9 @@ boin.exe inspect models\V2-AISO-SARASARA.onnx   # ONNX の入出力表示
 
 ## 追加モデル（自前で学習した .pth）
 
-`models/` フォルダに RVC v2 の `.pth` を置くと、GUI の声モデル一覧（「再読込」ボタン）と `boin models` にファイル名で現れ、初回選択時に自動で ONNX 化されます。F0 あり（ピッチ付き）のモデルなら `-p`（半音）のピッチ変更も効きます（RMVPE を初回に自動取得）。
+`models/` フォルダに RVC v2 の `.pth` を置くと、GUI の声モデル一覧（「再読込」ボタン）と `boin models` にファイル名で現れ、初回選択時に自動で ONNX 化されます。F0 あり（ピッチ付き）のモデルなら `-p`（半音）のピッチ変更も効きます。
+
+F0 ありモデルの初回読込時には RMVPE（`assets/rmvpe.onnx`、約 362MB）を Hugging Face から自動取得します。社内ネットワークなどで外部に出られない PC では取得できず読込が止まるので、別の PC で取得した `assets/rmvpe.onnx` を同じ場所にコピーしてから起動してください（`.pth` と一緒に `models/<名前>.onnx` もコピーすれば ONNX 変換も省けます）。
 
 ```powershell
 copy fem_blend.pth models\
