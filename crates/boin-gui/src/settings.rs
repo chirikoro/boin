@@ -13,6 +13,8 @@ pub struct Settings {
     pub lite: bool,
     pub overwrite: bool,
     pub output_sr: Option<u32>,
+    /// ピッチ変更（半音）。F0 ありモデルでのみ効く。
+    pub pitch: f32,
 }
 
 impl Default for Settings {
@@ -24,6 +26,7 @@ impl Default for Settings {
             lite: false,
             overwrite: false,
             output_sr: None,
+            pitch: 0.0,
         }
     }
 }

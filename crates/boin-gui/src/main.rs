@@ -298,6 +298,23 @@ impl eframe::App for App {
                     });
                 ui.add_space(8.0);
 
+                ui.label("ピッチ（半音）");
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::Slider::new(&mut self.settings.pitch, -24.0..=24.0)
+                            .step_by(1.0)
+                            .fixed_decimals(0),
+                    )
+                    .on_hover_text(
+                        "ピッチ付き（F0 あり）の追加モデルでのみ効きます。+12 で 1 オクターブ上。\n\
+                         同梱の 5 モデルはピッチ無しなので変化しません。",
+                    );
+                    if ui.small_button("0").on_hover_text("ピッチ変更なしに戻す").clicked() {
+                        self.settings.pitch = 0.0;
+                    }
+                });
+                ui.add_space(8.0);
+
                 ui.label("出力フォルダ");
                 let out_text = self
                     .settings

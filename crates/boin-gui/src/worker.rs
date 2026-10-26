@@ -130,6 +130,7 @@ fn run_convert(
     let opts = ConvertOptions {
         voice: settings.voice.clone(),
         output_sample_rate: settings.output_sr,
+        pitch_semitones: settings.pitch,
         ..Default::default()
     };
     let total = jobs.len();
