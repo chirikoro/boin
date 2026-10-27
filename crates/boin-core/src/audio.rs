@@ -26,7 +26,8 @@ impl Mono {
 
 /// 対応する入力拡張子（判定の目安。実際は内容で判別する）。
 pub const INPUT_EXTENSIONS: &[&str] = &[
-    "wav", "mp3", "flac", "ogg", "m4a", "aac", "mp4", "aiff", "aif", "mkv", "webm",
+    "wav", "mp3", "flac", "ogg", "m4a", "aac", "aiff", "aif", // 音声
+    "mp4", "m4v", "mov", "mkv", "webm", // 動画（音声トラックを使う。webm は Vorbis のみ、Opus は不可）
 ];
 
 /// 音声ファイルをデコードしてモノラル化する（複数チャンネルは平均）。
