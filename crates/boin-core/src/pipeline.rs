@@ -19,8 +19,11 @@ const SR: usize = 16_000;
 const WINDOW: usize = 160;
 const X_PAD: usize = 1;
 const X_QUERY: usize = 6;
-const X_CENTER: usize = 38;
-const X_MAX: usize = 41;
+const X_CENTER: usize = 12;
+const X_MAX: usize = 15;
+/// RMVPE を一度に推論するフレーム数（10ms 単位、約 20 秒）とその前後の重なり。
+const F0_CHUNK_FRAMES: usize = 2048;
+const F0_CHUNK_OVERLAP: usize = 128;
 const LATENT_CHANNELS: usize = 192;
 
 /// 変換パラメータ。
@@ -361,6 +364,9 @@ impl Converter {
     }
 
     /// RMVPE で F0 を推定し、ピッチシフトと粗い量子化を行う。長さは p_len に揃える。
+    ///
+    /// RMVPE の使用メモリは入力長に比例する（音声 1 秒あたり約 7MB）ので、
+    /// 音声全体を一度に渡さず、前後に重なりを持たせた固定長の区間に分けて推論する。
     fn get_f0(
         &mut self,
         audio_pad: &[f32],
@@ -369,34 +375,47 @@ impl Converter {
     ) -> Result<(Vec<i64>, Vec<f32>)> {
         let (mel, frames) = self.logmel.compute(audio_pad);
         let n_mels = self.logmel.n_mels();
-        // フレーム数を 32 の倍数にゼロ埋め
-        let n_pad = 32 * ((frames - 1) / 32 + 1) - frames;
-        let padded = frames + n_pad;
-        let mut mel_in = vec![0.0f32; n_mels * padded];
-        for m in 0..n_mels {
-            mel_in[m * padded..m * padded + frames]
-                .copy_from_slice(&mel[m * frames..(m + 1) * frames]);
-        }
         let rmvpe = self
             .rmvpe
             .as_mut()
             .ok_or_else(|| anyhow!("RMVPE が未読み込みです"))?;
         let input_name = rmvpe.inputs()[0].name().to_string();
         let output_name = rmvpe.outputs()[0].name().to_string();
-        let tensor = TensorRef::from_array_view(([1usize, n_mels, padded], mel_in.as_slice()))?;
-        let outputs = rmvpe.run(ort::inputs![input_name.as_str() => tensor])?;
-        let (shape, data) = outputs[output_name.as_str()].try_extract_tensor::<f32>()?;
-        let dims: Vec<i64> = shape.to_vec();
-        if dims.len() != 3 || dims[2] as usize != f0::RMVPE_CLASSES {
-            bail!("RMVPE の出力形状が想定外です: {:?}", dims);
+
+        let mut f0: Vec<f32> = Vec::with_capacity(frames);
+        let mut start = 0usize;
+        while start < frames {
+            let end = (start + F0_CHUNK_FRAMES).min(frames);
+            // 双方向 GRU の端の影響を避けるため、前後に重なりを付けて推論し中央だけ採用する
+            let lo = start.saturating_sub(F0_CHUNK_OVERLAP);
+            let hi = (end + F0_CHUNK_OVERLAP).min(frames);
+            let n = hi - lo;
+            // フレーム数を 32 の倍数にゼロ埋め
+            let padded = 32 * ((n - 1) / 32 + 1);
+            let mut mel_in = vec![0.0f32; n_mels * padded];
+            for m in 0..n_mels {
+                mel_in[m * padded..m * padded + n]
+                    .copy_from_slice(&mel[m * frames + lo..m * frames + hi]);
+            }
+            let tensor =
+                TensorRef::from_array_view(([1usize, n_mels, padded], mel_in.as_slice()))?;
+            let outputs = rmvpe.run(ort::inputs![input_name.as_str() => tensor])?;
+            let (shape, data) = outputs[output_name.as_str()].try_extract_tensor::<f32>()?;
+            let dims: Vec<i64> = shape.to_vec();
+            if dims.len() != 3 || dims[2] as usize != f0::RMVPE_CLASSES {
+                bail!("RMVPE の出力形状が想定外です: {:?}", dims);
+            }
+            let use_n = n.min(dims[1] as usize);
+            let chunk = f0::decode_rmvpe(
+                &data[..use_n * f0::RMVPE_CLASSES],
+                use_n,
+                opts.f0_threshold,
+            );
+            let from = start - lo;
+            let to = (end - lo).min(chunk.len());
+            f0.extend_from_slice(&chunk[from..to]);
+            start = end;
         }
-        let got_frames = dims[1] as usize;
-        let use_frames = frames.min(got_frames);
-        let mut f0 = f0::decode_rmvpe(
-            &data[..use_frames * f0::RMVPE_CLASSES],
-            use_frames,
-            opts.f0_threshold,
-        );
         f0::shift_semitones(&mut f0, opts.pitch_semitones);
         f0.resize(p_len, 0.0);
         let coarse = f0::coarse(&f0);

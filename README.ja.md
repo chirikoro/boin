@@ -65,6 +65,15 @@ Windows 版は `onnxruntime.dll` を実行時に読み込みます。exe と同�
 - **GPU (DirectML)**: 同梱の `onnxruntime.dll` は CPU 版のため、現状は選んでも CPU で動きます（登録失敗時は自動で CPU にフォールバック）。DirectML 対応版の ONNX Runtime（NuGet `Microsoft.ML.OnnxRuntime.DirectML`）の DLL に差し替えると有効になります。
 - **GPU (CoreML)**（macOS）: 手元の M4 Pro では CPU より遅かったため、Mac でも CPU 推奨です。
 
+### メモリ使用量
+
+変換中のメモリ使用量は、短い音声で約 1.5GB、長い音声（数分以上）で約 3〜4GB です（ピッチ付きモデルは +0.8GB）。
+「bad allocation」というエラーは、ONNX Runtime がこのメモリを確保できなかったときに出ます。
+
+- 複数の `boin.exe` を同時に動かすと、この量がプロセス数分かかります。メモリ 8GB の PC では同時実行を避け、16GB でも 2 つまでにしてください。
+- ブラウザなど他の大きなアプリを閉じると改善します。
+- v0.1.0 では長い音声で 6GB 以上、ピッチ付きモデルでは音声 1 分あたりさらに約 450MB を使っていました。それ以降のビルドでは上記まで抑えています。
+
 ## CLI
 
 ```powershell
@@ -145,7 +154,7 @@ GitHub Actions（`.github/workflows/build.yml`）が Windows（GNU ツールチ�
 ## 仕組み
 
 1. 入力をデコードし 16kHz モノラルへリサンプル、48Hz ハイパス（RVC 公式と同じ）
-2. 長い音声は無音に近い位置で約 40 秒ごとに分割（前後 1 秒の文脈付き）
+2. 長い音声は無音に近い位置で約 12 秒ごとに分割（前後 1 秒の文脈付き）。メモリ使用量を抑えるため RVC 公式の 38 秒より短くしている
 3. ContentVec（ONNX）で 768 次元の内容特徴量を抽出
 4. `.pth` から生成した生成器（ONNX）で 40kHz の音声を合成
 5. 区間を結合し、必要なら指定サンプルレートへ変換して WAV 出力
