@@ -397,8 +397,7 @@ impl Converter {
                 mel_in[m * padded..m * padded + n]
                     .copy_from_slice(&mel[m * frames + lo..m * frames + hi]);
             }
-            let tensor =
-                TensorRef::from_array_view(([1usize, n_mels, padded], mel_in.as_slice()))?;
+            let tensor = TensorRef::from_array_view(([1usize, n_mels, padded], mel_in.as_slice()))?;
             let outputs = rmvpe.run(ort::inputs![input_name.as_str() => tensor])?;
             let (shape, data) = outputs[output_name.as_str()].try_extract_tensor::<f32>()?;
             let dims: Vec<i64> = shape.to_vec();
@@ -406,11 +405,8 @@ impl Converter {
                 bail!("RMVPE の出力形状が想定外です: {:?}", dims);
             }
             let use_n = n.min(dims[1] as usize);
-            let chunk = f0::decode_rmvpe(
-                &data[..use_n * f0::RMVPE_CLASSES],
-                use_n,
-                opts.f0_threshold,
-            );
+            let chunk =
+                f0::decode_rmvpe(&data[..use_n * f0::RMVPE_CLASSES], use_n, opts.f0_threshold);
             let from = start - lo;
             let to = (end - lo).min(chunk.len());
             f0.extend_from_slice(&chunk[from..to]);
